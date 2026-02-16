@@ -1,27 +1,16 @@
-# Xposed Module Template (Based on libxposed)
+# Sony SemcPowerSaveModule Crash Fixer
 
-This is a general-purpose Xposed module template built on [libxposed](https://github.com/libxposed/api).
+### What does this module do?
 
-## How to Use
-
-1. **Modify Package Name**: Change `namespace` and `applicationId` in `app/build.gradle` to your own package name.
-2. **Rename Package Directory**: Rename the `app/src/main/java/com/example/module` directory to match your package structure.
-3. **Update Module Entry Point**: 
-   - Implement your logic in `MainModule.java`.
-   - Update the class name in `app/src/main/resources/META-INF/xposed/java_init.list` to ensure it points to your `XposedModule` implementation class.
-4. **Configure Scope**:
-   - List the package names of the apps you want to hook in `app/src/main/resources/META-INF/xposed/scope.list` (one per line).
-5. **Set Compilation Parameters**:
-   - Modify `compileSdk` and `targetSdkVersion` in `app/build.gradle` as needed.
-
-## Key Components
-
-- `MainModule.java`: The main entry point of the module, inheriting from `XposedModule`.
-- `java_init.list`: Tells libxposed which class is the entry point for the module.
-- `scope.list`: Defines the scope (apps) where the module will be active.
-- `module.prop`: Contains metadata information for the module.
-
-## Notes
-
-- This template uses the `libxposed` API. Please refer to its official documentation for more advanced usage.
-- Ensure that `compileOnly` dependencies are correctly configured during development to avoid bundling the Xposed API into your APK.
+Fix this issue:
+```bash
+I vendor.qti.hardware.servicetrackeraidl-service: total connections for client : com.sonyericsson.psm.sysmonserviceare :1
+E AndroidRuntime: Process: com.sonyericsson.psm.sysmonservice, PID: 24018
+E AndroidRuntime:   at com.sonyericsson.psm.sysmonservice.ProcessMonitor.getPkgName(ProcessMonitor.java:156)
+E AndroidRuntime:   at com.sonyericsson.psm.sysmonservice.ProcessMonitor.getProcInfo(ProcessMonitor.java:132)
+E AndroidRuntime:   at com.sonyericsson.psm.sysmonservice.ProcessMonitor.updateThread(ProcessMonitor.java:84)
+E AndroidRuntime:   at com.sonyericsson.psm.sysmonservice.ProcessMonitor.-$$Nest$mupdateThread(ProcessMonitor.java:0)
+E AndroidRuntime:   at com.sonyericsson.psm.sysmonservice.ProcessMonitor$1.run(ProcessMonitor.java:51)
+W ActivityManager: Process com.sonyericsson.psm.sysmonservice has crashed too many times, killing! Reason: crashed quickly
+I ActivityManager: Process com.sonyericsson.psm.sysmonservice (pid 24018) has died: pers PER
+```
