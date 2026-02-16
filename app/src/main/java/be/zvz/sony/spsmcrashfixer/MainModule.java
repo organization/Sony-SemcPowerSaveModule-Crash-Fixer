@@ -5,6 +5,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -34,49 +36,55 @@ public class MainModule extends XposedModule {
 
         try {
             Class<?> processMonitorClass = param.getClassLoader().loadClass(TARGET_CLASS);
+
             Method getPkgNameMethod = processMonitorClass.getDeclaredMethod("getPkgName", String.class);
             getPkgNameMethod.setAccessible(true);
+
             hook(getPkgNameMethod, ProcessMonitorHooker.class);
+
             Log.d(TAG, "Hooked getPkgName successfully.");
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook getPkgName", t);
         }
     }
 
+    /**
+     * Optimized ProcessMonitor.getPkgName Replacement
+     */
     @XposedHooker
     private static class ProcessMonitorHooker implements Hooker {
-        private static Field managerField;
-        private static Method getFromFileMethod;
+
+        private static MethodHandle mhThermalManagerGetter;
+        private static MethodHandle mhGetFromFile;
+        private static boolean isInitialized = false;
 
         @BeforeInvocation
         public static void before(@NonNull BeforeHookCallback callback) {
             try {
                 String str = (String) callback.getArgs()[0];
-                Object thisObject = callback.getThisObject();
+                if (str == null) {
+                    callback.returnAndSkip(null);
+                    return;
+                }
 
+                Object thisObject = callback.getThisObject();
                 if (thisObject == null) {
                     callback.returnAndSkip(null);
                     return;
                 }
 
-                if (managerField == null) {
-                    managerField = thisObject.getClass().getDeclaredField("mThermalEngineManager");
-                    managerField.setAccessible(true);
+                if (!isInitialized) {
+                    initializeHandles(thisObject);
                 }
 
-                Object currentThermalManager = managerField.get(thisObject);
-
-                if (currentThermalManager == null) {
+                Object thermalManager = mhThermalManagerGetter.invoke(thisObject);
+                if (thermalManager == null) {
                     callback.returnAndSkip(null);
                     return;
                 }
 
-                if (getFromFileMethod == null) {
-                    getFromFileMethod = currentThermalManager.getClass().getDeclaredMethod("getFromFile", String.class);
-                    getFromFileMethod.setAccessible(true);
-                }
-
-                String fromFile = (String) getFromFileMethod.invoke(currentThermalManager, "/proc/" + str + "/cmdline");
+                String path = "/proc/" + str + "/cmdline";
+                String fromFile = (String) mhGetFromFile.invoke(thermalManager, path);
 
                 if (fromFile != null && !fromFile.isEmpty()) {
                     String strTrim = fromFile.trim();
@@ -86,27 +94,31 @@ public class MainModule extends XposedModule {
                         return;
                     }
 
-                    if (strTrim.charAt(0) == '/') {
-                        int iLastIndexOf = strTrim.lastIndexOf('/') + 1;
+                    char firstChar = strTrim.charAt(0);
+
+                    if (firstChar == '/') {
+                        int iLastIndexOf = strTrim.lastIndexOf('/');
                         int iIndexOf = strTrim.indexOf("--");
 
-                        String result = iIndexOf >= iLastIndexOf
-                                ? strTrim.substring(iLastIndexOf, iIndexOf)
-                                : strTrim.substring(iLastIndexOf);
+                        int iLastIndexOfPlus1 = iLastIndexOf + 1;
+
+                        String result = iIndexOf >= iLastIndexOfPlus1
+                                ? strTrim.substring(iLastIndexOfPlus1, iIndexOf)
+                                : strTrim.substring(iLastIndexOfPlus1);
 
                         callback.returnAndSkip(result);
                         return;
                     }
 
-                    if (strTrim.charAt(0) != '(' && strTrim.charAt(0) != '<' && strTrim.charAt(0) != '-') {
+                    if (firstChar != '(' && firstChar != '<' && firstChar != '-') {
                         int iIndexOf2 = strTrim.indexOf(':');
-                        int iLastIndexOf2 = strTrim.lastIndexOf('/');
 
                         if (iIndexOf2 >= 0) {
                             callback.returnAndSkip(strTrim.substring(0, iIndexOf2));
                             return;
                         }
 
+                        int iLastIndexOf2 = strTrim.lastIndexOf('/');
                         String result = iLastIndexOf2 >= 0
                                 ? strTrim.substring(iLastIndexOf2 + 1)
                                 : strTrim;
@@ -122,6 +134,23 @@ public class MainModule extends XposedModule {
                 Log.e(TAG, "Error inside hook logic", t);
                 callback.throwAndSkip(t);
             }
+        }
+
+        private static void initializeHandles(Object instance) throws Exception {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            Class<?> instanceClass = instance.getClass();
+
+            Field managerField = instanceClass.getDeclaredField("mThermalEngineManager");
+            managerField.setAccessible(true);
+            mhThermalManagerGetter = lookup.unreflectGetter(managerField);
+
+            Class<?> managerClass = managerField.getType();
+
+            Method getFromFileMethod = managerClass.getDeclaredMethod("getFromFile", String.class);
+            getFromFileMethod.setAccessible(true);
+            mhGetFromFile = lookup.unreflect(getFromFileMethod);
+
+            isInitialized = true;
         }
     }
 }
