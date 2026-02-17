@@ -1,7 +1,6 @@
 package be.zvz.sony.spsmcrashfixer;
 
 import android.annotation.SuppressLint;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 
@@ -20,10 +19,12 @@ public class MainModule extends XposedModule {
 
     private static final String TARGET_PACKAGE = "com.sonyericsson.psm.sysmonservice";
     private static final String TARGET_CLASS = "com.sonyericsson.psm.sysmonservice.ProcessMonitor";
-    private static final String TAG = "SonySpsmCrashFixer";
+    private static XposedModule module;
 
     public MainModule(XposedInterface base, ModuleLoadedParam param) {
         super(base, param);
+        module = this;
+        this.log("Init module");
     }
 
     @Override
@@ -42,9 +43,9 @@ public class MainModule extends XposedModule {
 
             hook(getPkgNameMethod, ProcessMonitorHooker.class);
 
-            Log.d(TAG, "Hooked getPkgName successfully.");
+            this.log("Hooked getPkgName successfully.");
         } catch (Throwable t) {
-            Log.e(TAG, "Failed to hook getPkgName", t);
+            this.log( "Failed to hook getPkgName", t);
         }
     }
 
@@ -56,7 +57,7 @@ public class MainModule extends XposedModule {
 
         private static MethodHandle mhThermalManagerGetter;
         private static MethodHandle mhGetFromFile;
-        private static boolean isInitialized = false;
+        private static volatile boolean isInitialized = false;
 
         @BeforeInvocation
         public static void before(@NonNull BeforeHookCallback callback) {
@@ -131,12 +132,16 @@ public class MainModule extends XposedModule {
                 callback.returnAndSkip(null);
 
             } catch (Throwable t) {
-                Log.e(TAG, "Error inside hook logic", t);
+                module.log("Error inside hook logic", t);
                 callback.throwAndSkip(t);
             }
         }
 
-        private static void initializeHandles(Object instance) throws Exception {
+        private static synchronized void initializeHandles(Object instance) throws Exception {
+            if (isInitialized) {
+                return;
+            }
+
             MethodHandles.Lookup lookup = MethodHandles.lookup();
             Class<?> instanceClass = instance.getClass();
 
