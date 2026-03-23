@@ -1,6 +1,7 @@
 package be.zvz.sony.spsmcrashfixer;
 
 import android.annotation.SuppressLint;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 
@@ -11,26 +12,23 @@ import java.lang.reflect.Method;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
-import io.github.libxposed.api.annotations.BeforeInvocation;
-import io.github.libxposed.api.annotations.XposedHooker;
 
 @SuppressLint({"PrivateApi", "BlockedPrivateApi"})
 public class MainModule extends XposedModule {
 
+    private static final String TAG = "MainModule";
     private static final String TARGET_PACKAGE = "com.sonyericsson.psm.sysmonservice";
     private static final String TARGET_CLASS = "com.sonyericsson.psm.sysmonservice.ProcessMonitor";
     private static XposedModule module;
 
-    public MainModule(XposedInterface base, ModuleLoadedParam param) {
-        super(base, param);
+    @Override
+    public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
         module = this;
-        this.log("Init module");
+        log(Log.INFO, TAG, "Init module");
     }
 
     @Override
-    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
-        super.onPackageLoaded(param);
-
+    public void onPackageReady(@NonNull PackageReadyParam param) {
         if (!param.getPackageName().equals(TARGET_PACKAGE)) {
             return;
         }
@@ -41,37 +39,34 @@ public class MainModule extends XposedModule {
             Method getPkgNameMethod = processMonitorClass.getDeclaredMethod("getPkgName", String.class);
             getPkgNameMethod.setAccessible(true);
 
-            hook(getPkgNameMethod, ProcessMonitorHooker.class);
+            hook(getPkgNameMethod).intercept(new ProcessMonitorHooker());
 
-            this.log("Hooked getPkgName successfully.");
+            log(Log.INFO, TAG, "Hooked getPkgName successfully.");
         } catch (Throwable t) {
-            this.log( "Failed to hook getPkgName", t);
+            log(Log.ERROR, TAG, "Failed to hook getPkgName", t);
         }
     }
 
     /**
      * Optimized ProcessMonitor.getPkgName Replacement
      */
-    @XposedHooker
-    private static class ProcessMonitorHooker implements Hooker {
+    private static class ProcessMonitorHooker implements XposedInterface.Hooker {
 
         private static MethodHandle mhThermalManagerGetter;
         private static MethodHandle mhGetFromFile;
         private static volatile boolean isInitialized = false;
 
-        @BeforeInvocation
-        public static void before(@NonNull BeforeHookCallback callback) {
+        @Override
+        public Object intercept(@NonNull Chain chain) throws Throwable {
             try {
-                String str = (String) callback.getArgs()[0];
+                String str = (String) chain.getArg(0);
                 if (str == null) {
-                    callback.returnAndSkip(null);
-                    return;
+                    return null;
                 }
 
-                Object thisObject = callback.getThisObject();
+                Object thisObject = chain.getThisObject();
                 if (thisObject == null) {
-                    callback.returnAndSkip(null);
-                    return;
+                    return null;
                 }
 
                 if (!isInitialized) {
@@ -80,8 +75,7 @@ public class MainModule extends XposedModule {
 
                 Object thermalManager = mhThermalManagerGetter.invoke(thisObject);
                 if (thermalManager == null) {
-                    callback.returnAndSkip(null);
-                    return;
+                    return null;
                 }
 
                 String path = "/proc/" + str + "/cmdline";
@@ -91,8 +85,7 @@ public class MainModule extends XposedModule {
                     String strTrim = fromFile.trim();
 
                     if (strTrim.isEmpty()) {
-                        callback.returnAndSkip(null);
-                        return;
+                        return null;
                     }
 
                     char firstChar = strTrim.charAt(0);
@@ -103,37 +96,30 @@ public class MainModule extends XposedModule {
 
                         int iLastIndexOfPlus1 = iLastIndexOf + 1;
 
-                        String result = iIndexOf >= iLastIndexOfPlus1
+                        return iIndexOf >= iLastIndexOfPlus1
                                 ? strTrim.substring(iLastIndexOfPlus1, iIndexOf)
                                 : strTrim.substring(iLastIndexOfPlus1);
-
-                        callback.returnAndSkip(result);
-                        return;
                     }
 
                     if (firstChar != '(' && firstChar != '<' && firstChar != '-') {
                         int iIndexOf2 = strTrim.indexOf(':');
 
                         if (iIndexOf2 >= 0) {
-                            callback.returnAndSkip(strTrim.substring(0, iIndexOf2));
-                            return;
+                            return strTrim.substring(0, iIndexOf2);
                         }
 
                         int iLastIndexOf2 = strTrim.lastIndexOf('/');
-                        String result = iLastIndexOf2 >= 0
+                        return iLastIndexOf2 >= 0
                                 ? strTrim.substring(iLastIndexOf2 + 1)
                                 : strTrim;
-
-                        callback.returnAndSkip(result);
-                        return;
                     }
                 }
 
-                callback.returnAndSkip(null);
+                return null;
 
             } catch (Throwable t) {
-                module.log("Error inside hook logic", t);
-                callback.throwAndSkip(t);
+                module.log(Log.ERROR, TAG, "Error inside hook logic", t);
+                throw t;
             }
         }
 

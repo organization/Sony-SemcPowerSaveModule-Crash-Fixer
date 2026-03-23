@@ -10,7 +10,7 @@ android {
         applicationId = "be.zvz.sony.spsmcrashfixer"
         minSdk = 31
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "2.0.0"
     }
 
     lint {
@@ -44,5 +44,4 @@ android {
 dependencies {
     compileOnly("androidx.annotation:annotation:1.9.1")
     compileOnly("io.github.libxposed:api")
-    compileOnly(project(":libxposed-compat"))
 }
