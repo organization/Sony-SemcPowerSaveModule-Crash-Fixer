@@ -18,28 +18,26 @@ public class MainModule extends XposedModule {
 
     private static final String TAG = "MainModule";
     private static final String TARGET_PACKAGE = "com.sonyericsson.psm.sysmonservice";
-    private static final String TARGET_CLASS = "com.sonyericsson.psm.sysmonservice.ProcessMonitor";
-    private static XposedModule module;
+    private static final String TARGET_CLASS = TARGET_PACKAGE + ".ProcessMonitor";
 
     @Override
     public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
-        module = this;
         log(Log.INFO, TAG, "Init module");
     }
 
     @Override
     public void onPackageReady(@NonNull PackageReadyParam param) {
-        if (!param.getPackageName().equals(TARGET_PACKAGE)) {
+        if (!TARGET_PACKAGE.equals(param.getPackageName())) {
             return;
         }
 
         try {
             Class<?> processMonitorClass = param.getClassLoader().loadClass(TARGET_CLASS);
-
             Method getPkgNameMethod = processMonitorClass.getDeclaredMethod("getPkgName", String.class);
-            getPkgNameMethod.setAccessible(true);
 
-            hook(getPkgNameMethod).intercept(new ProcessMonitorHooker());
+            hook(getPkgNameMethod)
+                    .setExceptionMode(ExceptionMode.PASSTHROUGH)
+                    .intercept(new ProcessMonitorHooker());
 
             log(Log.INFO, TAG, "Hooked getPkgName successfully.");
         } catch (Throwable t) {
@@ -47,83 +45,69 @@ public class MainModule extends XposedModule {
         }
     }
 
-    /**
-     * Optimized ProcessMonitor.getPkgName Replacement
-     */
     private static class ProcessMonitorHooker implements XposedInterface.Hooker {
 
         private static MethodHandle mhThermalManagerGetter;
         private static MethodHandle mhGetFromFile;
-        private static volatile boolean isInitialized = false;
+        private static volatile boolean isInitialized;
 
         @Override
         public Object intercept(@NonNull Chain chain) throws Throwable {
-            try {
-                String str = (String) chain.getArg(0);
-                if (str == null) {
-                    return null;
-                }
-
-                Object thisObject = chain.getThisObject();
-                if (thisObject == null) {
-                    return null;
-                }
-
-                if (!isInitialized) {
-                    initializeHandles(thisObject);
-                }
-
-                Object thermalManager = mhThermalManagerGetter.invoke(thisObject);
-                if (thermalManager == null) {
-                    return null;
-                }
-
-                String path = "/proc/" + str + "/cmdline";
-                String fromFile = (String) mhGetFromFile.invoke(thermalManager, path);
-
-                if (fromFile != null && !fromFile.isEmpty()) {
-                    String strTrim = fromFile.trim();
-
-                    if (strTrim.isEmpty()) {
-                        return null;
-                    }
-
-                    char firstChar = strTrim.charAt(0);
-
-                    if (firstChar == '/') {
-                        int iLastIndexOf = strTrim.lastIndexOf('/');
-                        int iIndexOf = strTrim.indexOf("--");
-
-                        int iLastIndexOfPlus1 = iLastIndexOf + 1;
-
-                        return iIndexOf >= iLastIndexOfPlus1
-                                ? strTrim.substring(iLastIndexOfPlus1, iIndexOf)
-                                : strTrim.substring(iLastIndexOfPlus1);
-                    }
-
-                    if (firstChar != '(' && firstChar != '<' && firstChar != '-') {
-                        int iIndexOf2 = strTrim.indexOf(':');
-
-                        if (iIndexOf2 >= 0) {
-                            return strTrim.substring(0, iIndexOf2);
-                        }
-
-                        int iLastIndexOf2 = strTrim.lastIndexOf('/');
-                        return iLastIndexOf2 >= 0
-                                ? strTrim.substring(iLastIndexOf2 + 1)
-                                : strTrim;
-                    }
-                }
-
+            String str = (String) chain.getArg(0);
+            if (str == null) {
                 return null;
-
-            } catch (Throwable t) {
-                module.log(Log.ERROR, TAG, "Error inside hook logic", t);
-                throw t;
             }
+
+            Object thisObject = chain.getThisObject();
+            if (thisObject == null) {
+                return null;
+            }
+
+            if (!isInitialized) {
+                initializeHandles(thisObject);
+            }
+
+            Object thermalManager = mhThermalManagerGetter.invoke(thisObject);
+            if (thermalManager == null) {
+                return null;
+            }
+
+            String fromFile = (String) mhGetFromFile.invoke(thermalManager, "/proc/" + str + "/cmdline");
+            if (fromFile == null) {
+                return null;
+            }
+
+            String strTrim = fromFile.trim();
+            if (strTrim.isEmpty()) {
+                return null;
+            }
+
+            char firstChar = strTrim.charAt(0);
+
+            if (firstChar == '/') {
+                int iLastSlash = strTrim.lastIndexOf('/') + 1;
+                int iDash = strTrim.indexOf("--");
+                return iDash >= iLastSlash
+                        ? strTrim.substring(iLastSlash, iDash)
+                        : strTrim.substring(iLastSlash);
+            }
+
+            if (firstChar != '(' && firstChar != '<' && firstChar != '-') {
+                int iColon = strTrim.indexOf(':');
+                if (iColon >= 0) {
+                    return strTrim.substring(0, iColon);
+                }
+
+                int iLastSlash = strTrim.lastIndexOf('/');
+                return iLastSlash >= 0
+                        ? strTrim.substring(iLastSlash + 1)
+                        : strTrim;
+            }
+
+            return null;
         }
 
-        private static synchronized void initializeHandles(Object instance) throws Exception {
+        private static synchronized void initializeHandles(Object instance) throws ReflectiveOperationException {
             if (isInitialized) {
                 return;
             }
@@ -135,9 +119,7 @@ public class MainModule extends XposedModule {
             managerField.setAccessible(true);
             mhThermalManagerGetter = lookup.unreflectGetter(managerField);
 
-            Class<?> managerClass = managerField.getType();
-
-            Method getFromFileMethod = managerClass.getDeclaredMethod("getFromFile", String.class);
+            Method getFromFileMethod = managerField.getType().getDeclaredMethod("getFromFile", String.class);
             getFromFileMethod.setAccessible(true);
             mhGetFromFile = lookup.unreflect(getFromFileMethod);
 
